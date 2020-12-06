@@ -15,7 +15,7 @@ params.has_annotations = True
 
 params.scaling_ratio = 0.9
 params.use_hard_mining = False  # (optional)antrenare cu exemple puternic negative
-params.use_flip_images = True  # adauga imaginile cu fete oglindite
+params.use_flip_images = False  # adauga imaginile cu fete oglindite
 
 
 facial_detector: FacialDetector = FacialDetector(params)

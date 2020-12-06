@@ -100,7 +100,7 @@ class FacialDetector:
         best_accuracy = 0
         best_c = 0
         best_model = None
-        Cs = [10 ** -4,  10 ** -3,  10 ** -2, 10 ** -1]
+        Cs = [10 ** -4,  10 ** -3,  10 ** -2, 10 ** -1, 10 ** 0, 10 ** 1]
         for c in Cs:
             print('Antrenam un clasificator pentru c=%f' % c)
             model = LinearSVC(C=c)
@@ -227,6 +227,7 @@ class FacialDetector:
             # mutam fereastra peste toata imaginea
             scaling_idx = 0
             img_shape = img.shape
+            original_img = img.copy()
             while img.shape > (self.params.dim_window, self.params.dim_window):
                 if scaling_idx == 0:
                     h, w = img.shape
@@ -240,26 +241,23 @@ class FacialDetector:
                 c = hog_img.shape[1]
                 k = (self.params.dim_window // self.params.dim_hog_cell) - 1
                 #print(f'varianta {scaling_idx} a pozei, img shape {img.shape}')
-                for ymin in range(0, l - k, k):
-                    for xmin in range(0, c - k, k):
+                for ymin in range(0, l - k + 1):
+                    for xmin in range(0, c - k + 1):
                         xmax = xmin + k
                         ymax = ymin + k
-
                         # alegem fereastra curenta si ii calculam descriptorul
-                        window = hog_img[ymin:ymax, xmin:xmax]
+                        window = hog_img[ymin:ymax, xmin:xmax].flatten()
                         score = self.best_model.decision_function(window.reshape(1, -1))
 
                         if score > self.params.threshold:
                             scaled_xmin = int(xmin * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
                             scaled_ymin = int(ymin * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
-                            scaled_xmax = int(xmax * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
-                            scaled_ymax = int(ymax * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
-                            #print(scaled_xmax - scaled_xmin, scaled_ymax - scaled_ymin)
+                            scaled_xmax = int((xmax + 1) * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
+                            scaled_ymax = int((ymax + 1) * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
+
                             image_detections.append([scaled_xmin, scaled_ymin, scaled_xmax, scaled_ymax])
                             image_scores.append(score[0])
                 scaling_idx += 1
-                if scaling_idx == 0:
-                    break
 
             image_detections = np.array(image_detections)
             image_scores = np.array(image_scores)

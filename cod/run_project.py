@@ -6,24 +6,27 @@ from Visualize import *
 
 params: Parameters = Parameters()
 params.dim_window = 36  # exemplele pozitive (fete de oameni cropate) au 36x36 pixeli
-params.dim_hog_cell = 6  # dimensiunea celulei
+params.dim_hog_cell = 3  # dimensiunea celulei
 params.overlap = 0.3
 params.number_positive_examples = 6713  # numarul exemplelor pozitive
 params.number_negative_examples = 10000  # numarul exemplelor negative
-params.threshold = 3  # toate ferestrele cu scorul > threshold si maxime locale devin detectii
+params.threshold = -0.5  # toate ferestrele cu scorul > threshold si maxime locale devin detectii
 params.has_annotations = True
 
 params.scaling_ratio = 0.9
 params.use_hard_mining = False  # (optional)antrenare cu exemple puternic negative
-params.use_flip_images = False  # adauga imaginile cu fete oglindite
+params.use_flip_images = True  # adauga imaginile cu fete oglindite
 
 
 facial_detector: FacialDetector = FacialDetector(params)
 
 # Pasul 1. Incarcam exemplele pozitive (cropate) si exemple negative generate exemple pozitive
 # verificam daca ii avem deja salvati
-positive_features_path = os.path.join(params.dir_save_files, 'descriptoriExemplePozitive_' + str(params.dim_hog_cell) + '_' +
-                        str(params.number_positive_examples) + '.npy')
+if params.use_flip_images:
+    params.number_positive_examples *= 2
+
+positive_features_path = os.path.join(params.dir_save_files, 'descriptoriExemplePozitive_' + str(params.dim_hog_cell)
+                                      + '_' + str(params.number_positive_examples) + '.npy')
 if os.path.exists(positive_features_path):
     positive_features = np.load(positive_features_path)
     params.number_positive_examples = positive_features.shape[0]
@@ -35,8 +38,8 @@ else:
     print('Am salvat descriptorii pentru exemplele pozitive in fisierul %s' % positive_features_path)
 
 # exemple negative
-negative_features_path = os.path.join(params.dir_save_files, 'descriptoriExempleNegative_' + str(params.dim_hog_cell) + '_' +
-                        str(params.number_negative_examples) + '.npy')
+negative_features_path = os.path.join(params.dir_save_files, 'descriptoriExempleNegative_' + str(params.dim_hog_cell)
+                                      + '_' + str(params.number_negative_examples) + '.npy')
 if os.path.exists(negative_features_path):
     negative_features = np.load(negative_features_path)
     print('Am incarcat descriptorii pentru exemplele negative')
@@ -57,6 +60,24 @@ facial_detector.train_classifier(training_examples, train_labels)
 # astfel incat sa va returneze descriptorii detectiilor cu scor > 0 din cele 274 imagini negative
 # completati codul in continuare
 # TODO:  (optional)  completeaza codul in continuare
+if params.use_hard_mining:
+    hard_mining_features_path = os.path.join(params.dir_save_files,
+                                             'descriptoriPuternicNegativi_' + str(params.dim_hog_cell) + '_' +
+                                             str(params.number_positive_examples) + '.npy')
+    if os.path.exists(hard_mining_features_path):
+        hard_mining_descriptors = np.load(hard_mining_features_path)
+        print('Am incarcat descriptorii pentru exemplele puternic negative')
+    else:
+        print('Construim descriptorii pentru exemplele puternic negative:')
+        hard_mining_descriptors = facial_detector.run(return_descriptors=True)
+        np.save(hard_mining_features_path, hard_mining_descriptors)
+        print('Am salvat descriptorii pentru exemplele puternic negative in fisierul %s' % hard_mining_features_path)
+
+    training_examples = np.concatenate((np.squeeze(training_examples), np.squeeze(hard_mining_descriptors)), axis=0)
+    train_labels = np.concatenate((train_labels, np.zeros(hard_mining_descriptors.shape[0])))
+    facial_detector.train_classifier(training_examples, train_labels)
+    params.use_hard_mining = False
+    params.threshold = 0
 
 # Pasul 4. Ruleaza detectorul facial pe imaginile de test.
 

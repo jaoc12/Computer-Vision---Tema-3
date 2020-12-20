@@ -93,14 +93,14 @@ class FacialDetector:
         svm_file_name = os.path.join(self.params.dir_save_files, 'best_model_%d_%d_%d' %
                                      (self.params.dim_hog_cell, self.params.number_negative_examples,
                                       self.params.number_positive_examples))
-        if os.path.exists(svm_file_name):
+        if os.path.exists(svm_file_name) and self.params.use_hard_mining is False:
             self.best_model = pickle.load(open(svm_file_name, 'rb'))
             return
 
         best_accuracy = 0
         best_c = 0
         best_model = None
-        Cs = [10 ** -4,  10 ** -3,  10 ** -2, 10 ** -1, 10 ** 0, 10 ** 1]
+        Cs = [10 ** -5, 10 ** -4,  10 ** -3,  10 ** -2, 10 ** -1]
         for c in Cs:
             print('Antrenam un clasificator pentru c=%f' % c)
             model = LinearSVC(C=c)
@@ -142,7 +142,9 @@ class FacialDetector:
         box_a_area = (bbox_a[2] - bbox_a[0] + 1) * (bbox_a[3] - bbox_a[1] + 1)
         box_b_area = (bbox_b[2] - bbox_b[0] + 1) * (bbox_b[3] - bbox_b[1] + 1)
 
-        iou = inter_area / float(box_a_area + box_b_area - inter_area)
+        # pentru a nu avea impartire la zero
+        ep = 10 **(-12)
+        iou = inter_area / (float(box_a_area + box_b_area - inter_area) + ep)
 
         return iou
 
@@ -202,25 +204,28 @@ class FacialDetector:
         file_names: numpy array de dimensiune N, pentru fiecare detectie trebuie sa salvam numele imaginii.
         (doar numele, nu toata calea).
         """
-
-        test_images_path = os.path.join(self.params.dir_test_examples, '*.jpg')
-        test_files = glob.glob(test_images_path)
+        if return_descriptors is False:
+            test_images_path = os.path.join(self.params.dir_test_examples, '*.jpg')
+            test_files = glob.glob(test_images_path)
+        else:
+            test_images_path = os.path.join(self.params.dir_neg_examples, '*.jpg')
+            test_files = glob.glob(test_images_path)
         detections = None  # array cu toate detectiile pe care le obtinem
         scores = np.array([])  # array cu toate scorurile pe care le optinem
         file_names = np.array([])  # array cu fisiele, in aceasta lista fisierele vor aparea de mai multe ori, pentru fiecare
         # detectie din imagine, numele imaginii va aparea in aceasta lista
         w = self.best_model.coef_.T
+        w = np.squeeze(np.array(w))
         bias = self.best_model.intercept_[0]
         num_test_images = len(test_files)
         descriptors_to_return = []
-        #num_test_images
         for i in range(num_test_images):
             start_time = timeit.default_timer()
             print('Procesam imaginea de testare %d/%d..' % (i, num_test_images))
             img = cv.imread(test_files[i], cv.IMREAD_GRAYSCALE)
             # TODO: completati codul functiei in continuare
             short_file_name = ntpath.basename(test_files[i])
-            old_file_names_size = file_names.shape[0]
+            file_names_old_size = file_names.shape[0]
 
             image_detections = []
             image_scores = []
@@ -228,54 +233,59 @@ class FacialDetector:
             scaling_idx = 0
             img_shape = img.shape
             original_img = img.copy()
+            downscale = self.params.scaling_ratio
             while img.shape > (self.params.dim_window, self.params.dim_window):
-                if scaling_idx == 0:
-                    h, w = img.shape
-                else:
-                    h = int(img.shape[0] * self.params.scaling_ratio)
-                    w = int(img.shape[1] * self.params.scaling_ratio)
-                    img = cv.resize(img, (w, h))
+                if scaling_idx != 0:
+                    H = int(original_img.shape[0] * downscale)
+                    W = int(original_img.shape[1] * downscale)
+                    img = cv.resize(img, (W, H))
+
                 hog_img = hog(img, pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
                               cells_per_block=(2, 2), feature_vector=False)
                 l = hog_img.shape[0]
                 c = hog_img.shape[1]
                 k = (self.params.dim_window // self.params.dim_hog_cell) - 1
-                #print(f'varianta {scaling_idx} a pozei, img shape {img.shape}')
                 for ymin in range(0, l - k + 1):
                     for xmin in range(0, c - k + 1):
                         xmax = xmin + k
                         ymax = ymin + k
                         # alegem fereastra curenta si ii calculam descriptorul
                         window = hog_img[ymin:ymax, xmin:xmax].flatten()
-                        score = self.best_model.decision_function(window.reshape(1, -1))
+                        score = w @ window + bias
 
                         if score > self.params.threshold:
-                            scaled_xmin = int(xmin * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
-                            scaled_ymin = int(ymin * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
-                            scaled_xmax = int((xmax + 1) * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
-                            scaled_ymax = int((ymax + 1) * 6 * ((2 - self.params.scaling_ratio) ** scaling_idx))
+                            if return_descriptors is False:
+                                scaled_xmin = int(xmin * self.params.dim_hog_cell / downscale)
+                                scaled_ymin = int(ymin * self.params.dim_hog_cell / downscale)
+                                scaled_xmax = int((xmax + 1) * self.params.dim_hog_cell / downscale)
+                                scaled_ymax = int((ymax + 1) * self.params.dim_hog_cell / downscale)
 
-                            image_detections.append([scaled_xmin, scaled_ymin, scaled_xmax, scaled_ymax])
-                            image_scores.append(score[0])
+                                image_detections.append([scaled_xmin, scaled_ymin, scaled_xmax, scaled_ymax])
+                                image_scores.append(score)
+                            else:
+                                descriptors_to_return.append(window)
                 scaling_idx += 1
+                downscale = downscale * self.params.scaling_ratio
+                if return_descriptors is True:
+                    break
 
-            image_detections = np.array(image_detections)
-            image_scores = np.array(image_scores)
-            if len(image_detections):
-                image_detections, image_scores = self.non_maximum_suppression(image_detections, image_scores, img_shape)
-
-                if detections is None:
-                    detections = image_detections.copy()
-                else:
-                    detections = np.vstack((detections, image_detections))
-                scores = np.append(scores, image_scores)
-                file_names = np.append(file_names, np.array([short_file_name] * (detections.shape[0] - old_file_names_size)))
+            if return_descriptors is False:
+                image_detections = np.array(image_detections)
+                image_scores = np.array(image_scores)
+                if len(image_detections):
+                    image_detections, image_scores = self.non_maximum_suppression(image_detections, image_scores, img_shape)
+                    if detections is None:
+                        detections = image_detections.copy()
+                    else:
+                        detections = np.vstack((detections, image_detections))
+                    scores = np.append(scores, image_scores)
+                    file_names = np.append(file_names, np.array([short_file_name] * (detections.shape[0] - file_names_old_size)))
 
             end_time = timeit.default_timer()
             print('Timpul de procesarea al imaginii de testare %d/%d este %f sec.'
                   % (i, num_test_images, end_time - start_time))
         if return_descriptors:
-            return descriptors_to_return
+            return np.array(descriptors_to_return)
         return detections, scores, file_names
 
     def compute_average_precision(self, rec, prec):

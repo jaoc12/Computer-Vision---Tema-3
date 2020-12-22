@@ -6,14 +6,14 @@ from Visualize import *
 
 params: Parameters = Parameters()
 params.dim_window = 36  # exemplele pozitive (fete de oameni cropate) au 36x36 pixeli
-params.dim_hog_cell = 3  # dimensiunea celulei
+params.dim_hog_cell = 4  # dimensiunea celulei
 params.overlap = 0.3
 params.number_positive_examples = 6713  # numarul exemplelor pozitive
 params.number_negative_examples = 10000  # numarul exemplelor negative
-params.threshold = -0.5  # toate ferestrele cu scorul > threshold si maxime locale devin detectii
+params.threshold = 0  # toate ferestrele cu scorul > threshold si maxime locale devin detectii
 params.has_annotations = True
 
-params.scaling_ratio = 0.9
+params.scaling_ratio = 0.95
 params.use_hard_mining = False  # (optional)antrenare cu exemple puternic negative
 params.use_flip_images = True  # adauga imaginile cu fete oglindite
 
@@ -81,6 +81,10 @@ if params.use_hard_mining:
 
 # Pasul 4. Ruleaza detectorul facial pe imaginile de test.
 
+params_path = os.path.join(params.dir_save_files,
+                           'params')
+pickle.dump(params, open(params_path, 'wb'))
+print("Am salvat parametrii folositi")
 detections, scores, file_names = facial_detector.run()
 
 # Pasul 5. Evalueaza si vizualizeaza detectiile

@@ -37,6 +37,7 @@ class FacialDetector:
                                  cells_per_block=(2, 2))
             positive_descriptors.append(descriptor_img)
 
+            # daca parametrul use_flip_images este adevarat folosim si poza oglindita
             if self.params.use_flip_images is True:
                 img = cv.flip(img, 1)
 
@@ -70,6 +71,7 @@ class FacialDetector:
             img = cv.imread(files[i], cv.IMREAD_GRAYSCALE)
             h, w = img.shape
 
+            # alegem o fereastra aleatoare din care sa extragem un descriptor negativ
             # coltul din stanga sus -> (xmin, ymin)
             # coltul din dreapta sus -> (xmax, ymax) = (xmin + 35, ymin + 35)
             xmin = np.random.randint(0, w - self.params.dim_window, num_negative_per_image)
@@ -218,43 +220,52 @@ class FacialDetector:
         w = np.squeeze(np.array(w))
         bias = self.best_model.intercept_[0]
         num_test_images = len(test_files)
-        descriptors_to_return = []
+        descriptors_to_return = []  # array cu descriptorii negativi pentru hard mining
         for i in range(num_test_images):
             start_time = timeit.default_timer()
             print('Procesam imaginea de testare %d/%d..' % (i, num_test_images))
             img = cv.imread(test_files[i], cv.IMREAD_GRAYSCALE)
-            # TODO: completati codul functiei in continuare
+            # doar numele fisierului
             short_file_name = ntpath.basename(test_files[i])
+            # numarul de fisiere numite pana la poza i
             file_names_old_size = file_names.shape[0]
 
-            image_detections = []
-            image_scores = []
+            image_detections = []  # array cu detectiile obtinute pentru imaginea curenta
+            image_scores = []  # array cu scorurile obtinute pentru imaginea curenta
             # mutam fereastra peste toata imaginea
-            scaling_idx = 0
-            img_shape = img.shape
-            original_img = img.copy()
-            downscale = self.params.scaling_ratio
-            while img.shape > (self.params.dim_window, self.params.dim_window):
+            scaling_idx = 0  # folosim scaling_idx ca sa stim daca e necesar sa micsoram imaginea
+            img_shape = img.shape # retinem dimensiunea imaginii originale
+            original_img = img.copy()  # copiem imaginea originala
+            downscale = self.params.scaling_ratio # prima micsorare o sa fie cu valoarea lui scaling_ratio
+            while img.shape > (self.params.dim_window, self.params.dim_window):  # micsoram imaginea pana devine mai mica decat (36,36)
                 if scaling_idx != 0:
+                    # dupa prima rulare a ferestrei micsoram imaginea
                     H = int(original_img.shape[0] * downscale)
                     W = int(original_img.shape[1] * downscale)
                     img = cv.resize(img, (W, H))
 
+                # calculam descriptorul pentru toata imaginea pentru a rula mai repede
                 hog_img = hog(img, pixels_per_cell=(self.params.dim_hog_cell, self.params.dim_hog_cell),
                               cells_per_block=(2, 2), feature_vector=False)
+                # numarul de celule pentru descriptor
                 l = hog_img.shape[0]
                 c = hog_img.shape[1]
                 k = (self.params.dim_window // self.params.dim_hog_cell) - 1
+                # glisam o fereastra de k*k peste imagine
                 for ymin in range(0, l - k + 1):
                     for xmin in range(0, c - k + 1):
                         xmax = xmin + k
                         ymax = ymin + k
                         # alegem fereastra curenta si ii calculam descriptorul
                         window = hog_img[ymin:ymax, xmin:xmax].flatten()
+                        # calculam scorul ferestrei
                         score = w @ window + bias
 
+                        # verificam daca scorul este peste treshold
                         if score > self.params.threshold:
+                            # verificam daca returnam doar descriptorii pentru hard mining sau nu
                             if return_descriptors is False:
+                                # scalam indicii ferestrei curente la dimensiunea imaginii originale
                                 scaled_xmin = int(xmin * self.params.dim_hog_cell / downscale)
                                 scaled_ymin = int(ymin * self.params.dim_hog_cell / downscale)
                                 scaled_xmax = int((xmax + 1) * self.params.dim_hog_cell / downscale)
@@ -264,28 +275,35 @@ class FacialDetector:
                                 image_scores.append(score)
                             else:
                                 descriptors_to_return.append(window)
-                scaling_idx += 1
-                downscale = downscale * self.params.scaling_ratio
+                scaling_idx += 1  # variabila care indica daca am verificat imaginea originala
+                downscale = downscale * self.params.scaling_ratio  # cu cat va trebui sa micsoram imaginea
+                # pentru hard_mining am folosit doar imaginea de o singura scala
+                # pentru a nu avea prea multe exemple negative
                 if return_descriptors is True:
                     break
 
             if return_descriptors is False:
+                # convertim detectiile si scorurile la numpy array
                 image_detections = np.array(image_detections)
                 image_scores = np.array(image_scores)
                 if len(image_detections):
+                    # utilizam non-maximum-suppression pentru a elimina suprapunerile
                     image_detections, image_scores = self.non_maximum_suppression(image_detections, image_scores, img_shape)
                     if detections is None:
                         detections = image_detections.copy()
                     else:
                         detections = np.vstack((detections, image_detections))
                     scores = np.append(scores, image_scores)
+                    # adaugam in vectorul file_names numele imaginii procesate de n ori
+                    # astfel incat sa avem aceeasi dimensiune cu detections
                     file_names = np.append(file_names, np.array([short_file_name] * (detections.shape[0] - file_names_old_size)))
 
             end_time = timeit.default_timer()
             print('Timpul de procesarea al imaginii de testare %d/%d este %f sec.'
                   % (i, num_test_images, end_time - start_time))
+        # returnam in functie de contextul apelului
         if return_descriptors:
-            return np.array(descriptors_to_return)
+            return np.asarray(descriptors_to_return)
         return detections, scores, file_names
 
     def compute_average_precision(self, rec, prec):
